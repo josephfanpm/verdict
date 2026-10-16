@@ -1,0 +1,8 @@
+# One-click deploy on Render's free tier: https://render.com/deploy
+# The free tier's disk is ephemeral, so the demo data re-seeds on every restart.
+services:
+  - type: web
+    name: verdict
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
