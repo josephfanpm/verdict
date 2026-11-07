@@ -5,6 +5,7 @@ import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { analyze } from '../core/analyze.js';
 import { evaluate, validateFlag } from '../core/evaluate.js';
+import { timeseries } from '../core/timeseries.js';
 import type { FlagConfig } from '../core/types.js';
 import { Store } from './store.js';
 
@@ -189,6 +190,13 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
     const flag = store.getFlag(request.params.key);
     if (!flag) return notFound(reply, request.params.key);
     return analyze(flag, store.variantCounts(flag.key, flag.primaryMetric));
+  });
+
+  app.get<{ Params: { key: string } }>('/api/flags/:key/timeseries', async (request, reply) => {
+    const flag = store.getFlag(request.params.key);
+    if (!flag) return notFound(reply, request.params.key);
+    const { alpha } = analyze(flag, []);
+    return timeseries(flag, store.exposureRows(flag.key, flag.primaryMetric), alpha);
   });
 
   app.get<{ Params: { key: string } }>('/api/flags/:key/audit', async (request, reply) => {

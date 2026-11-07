@@ -116,6 +116,8 @@ const SCENARIOS: Scenario[] = [
   },
 ];
 
+const DEMO_SPAN_MS = 14 * 24 * 60 * 60 * 1000;
+
 const COUNTRIES = ['US', 'US', 'US', 'CA', 'GB', 'DE'];
 const PLANS = ['free', 'free', 'free', 'pro'];
 
@@ -146,7 +148,8 @@ export function seedDemo(store: Store, startTs = Date.UTC(2026, 8, 1)): void {
         if (!result.inExperiment) continue;
         if (random() < (scenario.exposureLoss?.[result.variant] ?? 0)) continue;
 
-        const ts = startTs + i * 1_000;
+        // Spread arrivals across two weeks so the dashboard's charts have a real timeline.
+        const ts = startTs + Math.floor((i / Math.max(1, scenario.users)) * DEMO_SPAN_MS);
         store.recordExposure(flag.key, userId, result.variant, flag.version, ts);
         if (random() < scenario.trueRates[result.variant]!) {
           store.recordEvent(userId, flag.primaryMetric, null, ts + 60_000);

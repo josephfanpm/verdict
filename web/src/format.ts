@@ -1,18 +1,12 @@
-import type { VerdictKind } from './api';
-
 export const pct = (x: number, digits = 1) => `${(x * 100).toFixed(digits)}%`;
 export const signedPct = (x: number, digits = 1) => `${x >= 0 ? '+' : ''}${pct(x, digits)}`;
 export const num = (x: number) => x.toLocaleString('en-US');
 export const pValue = (p: number) => (p < 0.001 ? '<0.001' : p.toFixed(3));
+export const shortDate = (ts: number) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-export const VERDICT_LABELS: Record<VerdictKind, string> = {
-  SHIP: 'Ship it',
-  DONT_SHIP: "Don't ship",
-  INVESTIGATE: 'Investigate',
-  KEEP_RUNNING: 'Keep running',
-  NO_DIFFERENCE: 'No difference',
-  NOT_STARTED: 'Not started',
-};
+/** NumberFlow format presets. */
+export const PERCENT_FORMAT = { style: 'percent', maximumFractionDigits: 1, minimumFractionDigits: 1 } as const;
+export const SIGNED_PERCENT_FORMAT = { ...PERCENT_FORMAT, signDisplay: 'exceptZero' } as const;
 
 export function timeAgo(ts: number): string {
   const seconds = Math.round((Date.now() - ts) / 1000);
@@ -32,3 +26,6 @@ export function timeAgo(ts: number): string {
   }
   return 'just now';
 }
+
+/** CSS color for a variant by its position: control is neutral, treatments take fixed categorical slots. */
+export const seriesColor = (index: number) => `var(--series-${Math.min(index, 4)})`;

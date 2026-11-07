@@ -8,7 +8,7 @@ Most experimentation tools hand you a dashboard of p-values and leave the judgme
 
 [![CI](https://github.com/josephfanpm/verdict/actions/workflows/ci.yml/badge.svg)](https://github.com/josephfanpm/verdict/actions/workflows/ci.yml)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Tests](https://img.shields.io/badge/tests-49_passing-0f7b45)
+![Tests](https://img.shields.io/badge/tests-51_passing-0f7b45)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ---
@@ -37,12 +37,20 @@ Verdict builds the guardrails for all three into the product, so the safe path i
 | **Change guardrails** | The API refuses edits that would bias a running test (HTTP 409) unless you explicitly restart it |
 | **Audit log** | Every change is versioned with a human-readable diff |
 | **TypeScript SDK** | Evaluates flags locally with zero network latency and batches exposures in the background |
+| **Dashboard** | Verdict first, details second: a confidence-interval plot, cumulative lift over time, traffic-split health, ⌘K search, light and dark themes |
 
 ![Experiment detail: a clear Ship verdict](docs/screenshot-detail.png)
 
 The screenshot below is the case I care about most. The `checklist` variant shows a statistically significant **+8.1%** lift, and a naive dashboard would say *ship it*. Verdict notices that `video-tour` is missing 1.6 points of its expected traffic (p = 4.9e-7), which means the data is broken, and refuses to call it.
 
 ![Sample ratio mismatch detected](docs/screenshot-srm.png)
+
+<details>
+<summary>Dark mode</summary>
+
+![Dark mode](docs/screenshot-dark.png)
+
+</details>
 
 ## Quick start
 
@@ -100,10 +108,11 @@ src/
     evaluate.ts   Targeting, rollout, variant assignment, validation
     stats.ts      Normal/chi-square distributions, z-test, CIs, sample size, SRM
     analyze.ts    Decision engine: counts → verdict + reasons
+    timeseries.ts Cumulative exposures and lift over time
   server/    Fastify API + SQLite store + demo data generator
   sdk/       Client SDK with local evaluation and batched ingestion
-web/         React dashboard (Vite)
-test/        49 tests: unit, API integration, SDK end-to-end
+web/         React dashboard (Vite, Tailwind v4, Radix, Motion, Recharts, visx)
+test/        51 tests: unit, API integration, SDK end-to-end
 ```
 
 ## How the decision engine works
@@ -174,7 +183,7 @@ await verdict.flush(); // exposures are sent before events, so conversions are n
 ## Testing
 
 ```bash
-npm test          # 49 tests in ~1s
+npm test          # 51 tests in ~1s
 npm run typecheck
 ```
 
