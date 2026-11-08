@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import type { ExposureRow } from '../core/timeseries.js';
 import type { FlagConfig, VariantCounts } from '../core/types.js';
 
 export interface AuditEntry {
@@ -142,6 +143,22 @@ export class Store {
       )
       .all(metric, flagKey) as Array<{ variant: string; exposures: number; conversions: number }>;
     return rows.map((r) => ({ variant: r.variant, exposures: Number(r.exposures), conversions: Number(r.conversions) }));
+  }
+
+  /** Every exposure with the time of the user's first qualifying conversion, oldest first. */
+  exposureRows(flagKey: string, metric: string): ExposureRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT e.variant AS variant,
+                e.ts      AS ts,
+                (SELECT MIN(ev.ts) FROM events ev
+                 WHERE ev.user_id = e.user_id AND ev.name = ? AND ev.ts >= e.ts) AS convertedAt
+         FROM exposures e
+         WHERE e.flag_key = ?
+         ORDER BY e.ts`
+      )
+      .all(metric, flagKey) as Array<{ variant: string; ts: number; convertedAt: number | null }>;
+    return rows.map((r) => ({ variant: r.variant, ts: Number(r.ts), convertedAt: r.convertedAt === null ? null : Number(r.convertedAt) }));
   }
 
   // --- audit log -----------------------------------------------------------

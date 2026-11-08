@@ -1,7 +1,8 @@
 import type { ExperimentReport, VerdictKind } from '../../src/core/analyze';
+import type { TimeseriesPoint } from '../../src/core/timeseries';
 import type { Evaluation, FlagConfig, UserContext } from '../../src/core/types';
 
-export type { ExperimentReport, VerdictKind, Evaluation, FlagConfig };
+export type { ExperimentReport, VerdictKind, Evaluation, FlagConfig, TimeseriesPoint };
 
 export interface FlagSummary {
   flag: FlagConfig;
@@ -44,6 +45,15 @@ function saveToken(token: string): void {
   }
 }
 
+/**
+ * The UI registers a handler that asks for the admin token in a dialog. Falls
+ * back to the browser prompt if nothing is mounted (e.g. in a script).
+ */
+let tokenHandler: () => Promise<string | null> = async () => window.prompt('Admin token') || null;
+export function setTokenHandler(handler: () => Promise<string | null>): void {
+  tokenHandler = handler;
+}
+
 async function request<T>(path: string, init: { method?: string; body?: unknown } = {}, retried = false): Promise<T> {
   const token = readToken();
   const response = await fetch(path, {
@@ -56,7 +66,7 @@ async function request<T>(path: string, init: { method?: string; body?: unknown 
   });
 
   if (response.status === 401 && !retried) {
-    const entered = window.prompt('This Verdict server requires an admin token to change flags:');
+    const entered = await tokenHandler();
     if (entered) {
       saveToken(entered);
       return request<T>(path, init, true);
@@ -74,6 +84,7 @@ export const api = {
   listFlags: () => request<FlagSummary[]>('/api/flags'),
   getFlag: (key: string) => request<FlagConfig>(`/api/flags/${encodeURIComponent(key)}`),
   results: (key: string) => request<ExperimentReport>(`/api/flags/${encodeURIComponent(key)}/results`),
+  timeseries: (key: string) => request<TimeseriesPoint[]>(`/api/flags/${encodeURIComponent(key)}/timeseries`),
   audit: (key: string) => request<AuditEntry[]>(`/api/flags/${encodeURIComponent(key)}/audit`),
   createFlag: (body: Partial<FlagConfig>) => request<FlagConfig>('/api/flags', { method: 'POST', body }),
   updateFlag: (key: string, body: Partial<FlagConfig>, force = false) =>

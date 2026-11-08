@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/josephfanpm/verdict/actions/workflows/ci.yml/badge.svg)](https://github.com/josephfanpm/verdict/actions/workflows/ci.yml)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![Tests](https://img.shields.io/badge/tests-49_passing-0f7b45)
+![Tests](https://img.shields.io/badge/tests-51_passing-0f7b45)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 **Try it:** [run locally in 3 commands](#getting-started) · [Docker](#getting-started) · deploy your own with [`render.yaml`](render.yaml)
@@ -48,12 +48,20 @@ Dashboards that only report significance answer "is p < 0.05 right now?", which 
 | **Clean counting** | First exposure wins; conversions only count if they happen after exposure |
 | **Audit log** | Every change versioned with a readable diff |
 | **TypeScript SDK** | Local evaluation, batched exposure tracking |
+| **Dashboard** | Verdict first, details second: confidence-interval plot, cumulative lift over time, traffic-split health, ⌘K search, light and dark themes |
 
 ![Experiment detail: a clear Ship verdict](docs/screenshot-detail.png)
 
 The case that matters most: the `checklist` variant shows a significant **+8.1%** lift, and a p-value dashboard would say ship. Verdict sees `video-tour` is missing 1.6 points of its expected traffic (p = 4.9e-7), so the data is broken, and it refuses to call it.
 
 ![Sample ratio mismatch detected](docs/screenshot-srm.png)
+
+<details>
+<summary>Dark mode</summary>
+
+![Dark mode](docs/screenshot-dark.png)
+
+</details>
 
 ### How it decides
 
@@ -100,7 +108,7 @@ I built Verdict with Claude Code as a pair programmer. I set the product directi
 | Peeking cost, 2,000 A/A tests | 25.1% false positives with peeking vs 5.5% checking once | [`scripts/peeking.ts`](scripts/peeking.ts) |
 | SRM catch in demo data | 7% exposure loss in one arm flagged at p = 4.9e-7, over a "significant" +8.1% lift | [`src/server/demo.ts`](src/server/demo.ts), screenshot above |
 | Verdict coverage | One test per verdict branch, including "significant but under-powered" and "great lift, broken split" | [`test/analyze.test.ts`](test/analyze.test.ts) |
-| Test suite | 49 tests in about 1 second; CI on every push to `main` | [`ci.yml`](.github/workflows/ci.yml) |
+| Test suite | 51 tests in about 1 second; CI on every push to `main` | [`ci.yml`](.github/workflows/ci.yml) |
 | Demo seeding | 5 experiments, ~100k simulated users, under 1 second | `npm run simulate` |
 
 **KPIs I would track in production (proposed, not measured):**
@@ -152,7 +160,7 @@ flowchart LR
   UI -. same code .-> CORE
 ```
 
-- **Stack:** TypeScript (strict), Fastify + zod, Node 22 `node:sqlite`, React + Vite, Vitest, GitHub Actions, Docker.
+- **Stack:** TypeScript (strict), Fastify + zod, Node 22 `node:sqlite`, React + Vite + Tailwind v4 + Radix, Vitest, GitHub Actions, Docker.
 - **Statistics by hand:** z-test, delta-method CIs, sample size, and a chi-square distribution (regularized incomplete gamma) with no stats library, so every number traces to a formula. Tested against published table values. See [`stats.ts`](src/core/stats.ts).
 - **Two independent hashes:** one decides *whether* a user is in, one decides *which* variant. Ramping 10% → 50% only adds users. See [`evaluate.ts`](src/core/evaluate.ts).
 - **Bugs the tests caught:** SDK exposures timestamped on the server made every conversion look like it came first, so it was dropped; per-variant rounding left 1 in 10,000 users unbucketed. Both now have regression tests ([article](docs/article.md)).

@@ -37,10 +37,11 @@ src/
     evaluate.ts   Targeting, rollout, variant assignment, validation
     stats.ts      Normal/chi-square distributions, z-test, CIs, sample size, SRM
     analyze.ts    Decision engine: counts → verdict + reasons
+    timeseries.ts Cumulative exposures and lift over time
   server/    Fastify API + SQLite store + demo data generator
   sdk/       Client SDK with local evaluation and batched ingestion
-web/         React dashboard (Vite)
-test/        49 tests: unit, API integration, SDK end-to-end
+web/         React dashboard (Vite, Tailwind v4, Radix, Motion, Recharts, visx)
+test/        51 tests: unit, API integration, SDK end-to-end
 scripts/     simulate.ts (demo data), peeking.ts (A/A peeking simulation)
 ```
 
@@ -115,7 +116,7 @@ await verdict.flush(); // exposures are sent before events, so conversions are n
 ## Testing
 
 ```bash
-npm test          # 49 tests in ~1s
+npm test          # 51 tests in ~1s
 npm run typecheck
 npm run peeking   # A/A simulation: false-positive rate with and without peeking
 ```

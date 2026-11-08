@@ -82,6 +82,25 @@ describe('evaluation and results', () => {
   });
 });
 
+describe('timeseries', () => {
+  it('returns cumulative exposures and lift that end at the current totals', async () => {
+    await createFlag();
+    for (let i = 0; i < 40; i++) await evaluateUser(`user-${i}`);
+    await app.inject({ method: 'POST', url: '/api/track', payload: { events: [{ userId: 'user-1', event: 'purchase' }] } });
+
+    const points = (await app.inject({ method: 'GET', url: '/api/flags/checkout/timeseries' })).json();
+    const results = (await app.inject({ method: 'GET', url: '/api/flags/checkout/results' })).json();
+    const last = points[points.length - 1];
+    for (const v of results.variants) expect(last.exposures[v.variant]).toBe(v.exposures);
+    expect(Object.keys(last.lift)).toEqual(['treatment']);
+  });
+
+  it('is empty before anyone is exposed', async () => {
+    await createFlag();
+    expect((await app.inject({ method: 'GET', url: '/api/flags/checkout/timeseries' })).json()).toEqual([]);
+  });
+});
+
 describe('change guardrails', () => {
   beforeEach(async () => {
     await createFlag({ rolloutPercent: 50 });
