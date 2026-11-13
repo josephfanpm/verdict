@@ -15,9 +15,9 @@ interface VerdictMeta {
 }
 
 export const VERDICT: Record<VerdictKind, VerdictMeta> = {
-  SHIP: { label: 'Ship it', icon: CircleCheck, text: 'text-good', bg: 'bg-good-bg', hint: 'A winner with enough data' },
-  DONT_SHIP: { label: "Don't ship", icon: OctagonX, text: 'text-bad', bg: 'bg-bad-bg', hint: 'A treatment is hurting the metric' },
-  INVESTIGATE: { label: 'Investigate', icon: TriangleAlert, text: 'text-warn', bg: 'bg-warn-bg', hint: 'The traffic split is broken' },
+  SHIP: { label: 'Ship it', icon: CircleCheck, text: 'text-good', bg: 'bg-good-bg', hint: 'A winner, with guardrails intact' },
+  DONT_SHIP: { label: "Don't ship", icon: OctagonX, text: 'text-bad', bg: 'bg-bad-bg', hint: 'A treatment hurts the goal or a guardrail' },
+  INVESTIGATE: { label: 'Investigate', icon: TriangleAlert, text: 'text-warn', bg: 'bg-warn-bg', hint: "The data can't be trusted yet" },
   KEEP_RUNNING: { label: 'Keep running', icon: Hourglass, text: 'text-info', bg: 'bg-info-bg', hint: 'Not enough data yet' },
   NO_DIFFERENCE: { label: 'No difference', icon: Equal, text: 'text-neutral', bg: 'bg-neutral-bg', hint: 'Fully powered, no real change' },
   NOT_STARTED: { label: 'Not started', icon: CircleDashed, text: 'text-fg-faint', bg: 'bg-neutral-bg', hint: 'No exposures yet' },

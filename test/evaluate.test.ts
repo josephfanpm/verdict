@@ -1,25 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { evaluate, validateFlag } from '../src/core/evaluate.js';
+import { normalizeFlag, type FlagInput } from '../src/core/flag.js';
 import type { FlagConfig } from '../src/core/types.js';
 
-function flag(overrides: Partial<FlagConfig> = {}): FlagConfig {
-  return {
-    key: 'test-flag',
-    description: '',
-    enabled: true,
-    salt: 'abc',
-    rolloutPercent: 100,
-    variants: [
-      { key: 'control', weight: 50 },
-      { key: 'treatment', weight: 50 },
-    ],
-    defaultVariant: 'control',
-    targeting: [],
-    primaryMetric: 'conversion',
-    minDetectableEffect: 0.1,
-    version: 1,
-    ...overrides,
-  };
+function flag(overrides: Partial<FlagInput> = {}): FlagConfig {
+  return normalizeFlag({ key: 'test-flag', enabled: true, salt: 'abc', ...overrides });
 }
 
 const users = Array.from({ length: 20_000 }, (_, i) => ({ id: `user-${i}` }));
@@ -130,5 +115,102 @@ describe('validateFlag', () => {
       })
     );
     expect(errors).toHaveLength(3);
+  });
+});
+
+describe('evaluation order', () => {
+  const staff = { conditions: [{ attribute: 'email', operator: 'contains' as const, values: ['@acme.com'] }], variant: 'treatment' };
+
+  it('forces a variant for override matches without counting them, even before launch', () => {
+    const draft = flag({ enabled: false, overrides: [staff] });
+    const result = evaluate(draft, { id: 'u1', attributes: { email: 'qa@acme.com' } });
+    expect(result).toMatchObject({ variant: 'treatment', reason: 'OVERRIDE', inExperiment: false });
+    expect(evaluate(draft, { id: 'u1', attributes: { email: 'someone@else.com' } }).reason).toBe('FLAG_DISABLED');
+  });
+
+  it('serves the shipped variant to everyone once rolled out', () => {
+    const shipped = flag({ status: 'rolled_out', rolledOutVariant: 'treatment' });
+    for (const user of users.slice(0, 200)) {
+      expect(evaluate(shipped, user)).toMatchObject({ variant: 'treatment', reason: 'ROLLED_OUT', inExperiment: false });
+    }
+  });
+
+  it('returns the variant payload when there is one', () => {
+    const f = flag({
+      variants: [
+        { key: 'control', weight: 50, value: { columns: 3 } },
+        { key: 'treatment', weight: 50, value: { columns: 1 } },
+      ],
+    });
+    const result = evaluate(f, { id: 'user-1' });
+    expect(result.value).toEqual({ columns: result.variant === 'control' ? 3 : 1 });
+  });
+
+  it('buckets on the anonymous id so logging in does not change the variant', () => {
+    const f = flag();
+    for (let i = 0; i < 500; i++) {
+      const before = evaluate(f, { id: `anon-${i}` });
+      const after = evaluate(f, { id: `account-${i}`, anonymousId: `anon-${i}` });
+      expect(after.variant).toBe(before.variant);
+      expect(after.unitId).toBe(`anon-${i}`);
+    }
+  });
+});
+
+describe('holdouts', () => {
+  it('holds back the same users from every flag that shares the holdout', () => {
+    const a = flag({ salt: 'one', holdout: { key: 'h1', percent: 10 } });
+    const b = flag({ salt: 'two', holdout: { key: 'h1', percent: 10 } });
+    let held = 0;
+    for (const user of users) {
+      const ra = evaluate(a, user);
+      const rb = evaluate(b, user);
+      expect(ra.holdout!.held).toBe(rb.holdout!.held);
+      if (ra.holdout!.held) {
+        held++;
+        expect(ra).toMatchObject({ variant: 'control', reason: 'HOLDOUT', inExperiment: false });
+      }
+    }
+    expect(held / users.length).toBeCloseTo(0.1, 1);
+  });
+});
+
+describe('mutual exclusion', () => {
+  it('never puts one user in two experiments that share a group', () => {
+    const a = flag({ salt: 'one', exclusion: { group: 'checkout', start: 0, end: 50 } });
+    const b = flag({ salt: 'two', exclusion: { group: 'checkout', start: 50, end: 100 } });
+    let inA = 0;
+    for (const user of users) {
+      const ra = evaluate(a, user);
+      const rb = evaluate(b, user);
+      expect(ra.inExperiment && rb.inExperiment).toBe(false);
+      expect(ra.inExperiment || rb.inExperiment).toBe(true);
+      if (ra.inExperiment) inA++;
+    }
+    expect(inA / users.length).toBeCloseTo(0.5, 1);
+  });
+
+  it('keeps the split inside a slice balanced', () => {
+    const f = flag({ exclusion: { group: 'g', start: 0, end: 30 } });
+    const assigned = users.map((u) => evaluate(f, u)).filter((r) => r.inExperiment);
+    expect(assigned.filter((r) => r.variant === 'treatment').length / assigned.length).toBeCloseTo(0.5, 1);
+  });
+});
+
+describe('validateFlag for the experiment settings', () => {
+  it('rejects broken metrics, overrides and ranges', () => {
+    const errors = validateFlag(
+      flag({
+        goal: { event: 'revenue', kind: 'ratio' },
+        overrides: [{ conditions: [], variant: 'nope' }],
+        exclusion: { group: 'g', start: 60, end: 40 },
+        minRuntimeDays: 400,
+      })
+    );
+    expect(errors.join(' ')).toMatch(/denominator/);
+    expect(errors.join(' ')).toMatch(/not one of the variants/);
+    expect(errors.join(' ')).toMatch(/at least one condition/);
+    expect(errors.join(' ')).toMatch(/Exclusion range/);
+    expect(errors.join(' ')).toMatch(/Minimum runtime/);
   });
 });

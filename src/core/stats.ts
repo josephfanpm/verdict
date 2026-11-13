@@ -116,6 +116,73 @@ export function chiSquarePValue(statistic: number, degreesOfFreedom: number): nu
   return upperIncompleteGamma(degreesOfFreedom / 2, statistic / 2);
 }
 
+/** Continued fraction for the incomplete beta function (modified Lentz). */
+function betaContinuedFraction(a: number, b: number, x: number): number {
+  const EPS = 1e-14;
+  const TINY = 1e-300;
+  const qab = a + b;
+  const qap = a + 1;
+  const qam = a - 1;
+  let c = 1;
+  let d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < TINY) d = TINY;
+  d = 1 / d;
+  let h = d;
+  for (let m = 1; m <= 500; m++) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < TINY) d = TINY;
+    c = 1 + aa / c;
+    if (Math.abs(c) < TINY) c = TINY;
+    d = 1 / d;
+    h *= d * c;
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < TINY) d = TINY;
+    c = 1 + aa / c;
+    if (Math.abs(c) < TINY) c = TINY;
+    d = 1 / d;
+    const delta = d * c;
+    h *= delta;
+    if (Math.abs(delta - 1) < EPS) break;
+  }
+  return h;
+}
+
+/** Regularized incomplete beta function I_x(a, b). */
+function incompleteBeta(x: number, a: number, b: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const front = Math.exp(lnGamma(a + b) - lnGamma(a) - lnGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+  return x < (a + 1) / (a + b + 2) ? (front * betaContinuedFraction(a, b, x)) / a : 1 - (front * betaContinuedFraction(b, a, 1 - x)) / b;
+}
+
+/** P(T <= t) for Student's t distribution. */
+export function studentTCdf(t: number, degreesOfFreedom: number): number {
+  if (!Number.isFinite(degreesOfFreedom) || degreesOfFreedom > 1e6) return normalCdf(t);
+  const tail = 0.5 * incompleteBeta(degreesOfFreedom / (degreesOfFreedom + t * t), degreesOfFreedom / 2, 0.5);
+  return t > 0 ? 1 - tail : tail;
+}
+
+/** Inverse of studentTCdf, by bisection (the CDF is monotone, so this always converges). */
+export function studentTQuantile(p: number, degreesOfFreedom: number): number {
+  if (!(p > 0 && p < 1)) throw new RangeError('p must be in (0, 1)');
+  if (!Number.isFinite(degreesOfFreedom) || degreesOfFreedom > 1e6) return normalQuantile(p);
+  if (p === 0.5) return 0;
+  // The t quantile is always at least as far from zero as the normal quantile.
+  let low = p > 0.5 ? 0 : -1;
+  let high = p > 0.5 ? 1 : 0;
+  if (p > 0.5) while (studentTCdf(high, degreesOfFreedom) < p) high *= 2;
+  else while (studentTCdf(low, degreesOfFreedom) > p) low *= 2;
+  for (let i = 0; i < 80; i++) {
+    const mid = (low + high) / 2;
+    if (studentTCdf(mid, degreesOfFreedom) < p) low = mid;
+    else high = mid;
+  }
+  return (low + high) / 2;
+}
+
 // ---------------------------------------------------------------------------
 // Experiment statistics
 // ---------------------------------------------------------------------------
@@ -133,9 +200,95 @@ export interface Comparison {
   relativeLift: number | null;
   /** Confidence interval for the relative lift. */
   relativeLiftInterval: [number, number] | null;
+  /** Confidence interval for the absolute difference. */
+  absoluteInterval: [number, number];
   zScore: number;
   pValue: number;
   significant: boolean;
+  /** Which test produced the p-value and interval. */
+  method: 'z' | 't' | 'sequential';
+}
+
+/**
+ * Sequential testing. A fixed-horizon test is only valid if it is read once,
+ * at the planned sample size. The always-valid version (a mixture sequential
+ * probability ratio test with a normal mixing prior) stays valid no matter how
+ * often it is read, at the cost of a wider interval.
+ *
+ * `tuning` is the total sample size at which the interval should be tightest;
+ * the planned sample size is the natural choice.
+ */
+export interface SequentialOptions {
+  tuning: number;
+}
+
+function mixingScale(alpha: number, tuning: number): number {
+  const a = -2 * Math.log(alpha);
+  return (a + Math.log(a + 1)) / Math.max(1, tuning);
+}
+
+/** The always-valid replacement for the z critical value at total sample size n. */
+export function sequentialCritical(n: number, alpha: number, tuning: number): number {
+  const nr = n * mixingScale(alpha, tuning);
+  return Math.sqrt(((2 * (nr + 1)) / nr) * Math.log(Math.sqrt(nr + 1) / alpha));
+}
+
+/** Always-valid p-value for a z statistic observed at total sample size n. */
+export function sequentialPValue(z: number, n: number, alpha: number, tuning: number): number {
+  const nr = n * mixingScale(alpha, tuning);
+  return Math.min(1, Math.sqrt(nr + 1) * Math.exp((-z * z * nr) / (2 * (nr + 1))));
+}
+
+interface Estimate {
+  control: number;
+  treatment: number;
+  /** Standard error used for the test statistic. */
+  testSe: number;
+  /** Standard error of the absolute difference, used for its interval. */
+  diffSe: number;
+  /** Standard error of the relative lift (delta method), or null when control is not positive. */
+  relativeSe: number | null;
+  /** Total users across both arms. */
+  n: number;
+  /** Degrees of freedom for a t-test; omit for a z-test. */
+  degreesOfFreedom?: number;
+}
+
+function conclude(e: Estimate, alpha: number, sequential?: SequentialOptions): Comparison {
+  const diff = e.treatment - e.control;
+  const zScore = e.testSe === 0 ? 0 : diff / e.testSe;
+
+  let pValue: number;
+  let critical: number;
+  let method: Comparison['method'];
+  if (sequential) {
+    method = 'sequential';
+    critical = sequentialCritical(e.n, alpha, sequential.tuning);
+    pValue = e.testSe === 0 ? 1 : sequentialPValue(zScore, e.n, alpha, sequential.tuning);
+  } else if (e.degreesOfFreedom !== undefined) {
+    method = 't';
+    critical = studentTQuantile(1 - alpha / 2, e.degreesOfFreedom);
+    pValue = e.testSe === 0 ? 1 : 2 * (1 - studentTCdf(Math.abs(zScore), e.degreesOfFreedom));
+  } else {
+    method = 'z';
+    critical = normalQuantile(1 - alpha / 2);
+    pValue = e.testSe === 0 ? 1 : 2 * (1 - normalCdf(Math.abs(zScore)));
+  }
+
+  const relativeLift = e.control > 0 ? e.treatment / e.control - 1 : null;
+  return {
+    controlRate: e.control,
+    treatmentRate: e.treatment,
+    absoluteLift: diff,
+    relativeLift,
+    relativeLiftInterval:
+      relativeLift !== null && e.relativeSe !== null ? [relativeLift - critical * e.relativeSe, relativeLift + critical * e.relativeSe] : null,
+    absoluteInterval: [diff - critical * e.diffSe, diff + critical * e.diffSe],
+    zScore,
+    pValue,
+    significant: pValue < alpha,
+    method,
+  };
 }
 
 /**
@@ -145,39 +298,179 @@ export interface Comparison {
  * both arms share one rate). The relative-lift interval uses the delta method
  * on the ratio of rates, which accounts for noise in both arms.
  */
-export function compareProportions(control: Arm, treatment: Arm, alpha = 0.05): Comparison | null {
+export function compareProportions(control: Arm, treatment: Arm, alpha = 0.05, sequential?: SequentialOptions): Comparison | null {
   if (control.exposures === 0 || treatment.exposures === 0) return null;
 
   const pC = control.conversions / control.exposures;
   const pT = treatment.conversions / treatment.exposures;
   const pooled = (control.conversions + treatment.conversions) / (control.exposures + treatment.exposures);
-  const pooledSe = Math.sqrt(pooled * (1 - pooled) * (1 / control.exposures + 1 / treatment.exposures));
+  const varC = (pC * (1 - pC)) / control.exposures;
+  const varT = (pT * (1 - pT)) / treatment.exposures;
 
-  const zScore = pooledSe === 0 ? 0 : (pT - pC) / pooledSe;
-  const pValue = pooledSe === 0 ? 1 : 2 * (1 - normalCdf(Math.abs(zScore)));
+  return conclude(
+    {
+      control: pC,
+      treatment: pT,
+      testSe: Math.sqrt(pooled * (1 - pooled) * (1 / control.exposures + 1 / treatment.exposures)),
+      diffSe: Math.sqrt(varC + varT),
+      relativeSe: pC > 0 ? Math.sqrt(varT / pC ** 2 + (pT ** 2 * varC) / pC ** 4) : null,
+      n: control.exposures + treatment.exposures,
+    },
+    alpha,
+    sequential
+  );
+}
 
-  let relativeLift: number | null = null;
-  let relativeLiftInterval: [number, number] | null = null;
-  if (pC > 0) {
-    const ratio = pT / pC;
-    relativeLift = ratio - 1;
-    const varC = (pC * (1 - pC)) / control.exposures;
-    const varT = (pT * (1 - pT)) / treatment.exposures;
-    const ratioSe = Math.sqrt(varT / pC ** 2 + (pT ** 2 * varC) / pC ** 4);
-    const zCrit = normalQuantile(1 - alpha / 2);
-    relativeLiftInterval = [relativeLift - zCrit * ratioSe, relativeLift + zCrit * ratioSe];
-  }
+/** A per-user average and how much it varies from user to user. */
+export interface Moments {
+  n: number;
+  mean: number;
+  /** Sample variance of the per-user values. */
+  variance: number;
+}
 
-  return {
-    controlRate: pC,
-    treatmentRate: pT,
-    absoluteLift: pT - pC,
-    relativeLift,
-    relativeLiftInterval,
-    zScore,
-    pValue,
-    significant: pValue < alpha,
-  };
+/**
+ * Welch's t-test for metrics that are not yes/no: revenue per user, events per
+ * user, or anything else with a per-user value. Unlike the pooled test it does
+ * not assume both arms vary by the same amount.
+ */
+export function compareMeans(control: Moments, treatment: Moments, alpha = 0.05, sequential?: SequentialOptions): Comparison | null {
+  if (control.n < 2 || treatment.n < 2) return null;
+
+  const varC = control.variance / control.n;
+  const varT = treatment.variance / treatment.n;
+  const se = Math.sqrt(varC + varT);
+  const denominator = varC ** 2 / (control.n - 1) + varT ** 2 / (treatment.n - 1);
+
+  return conclude(
+    {
+      control: control.mean,
+      treatment: treatment.mean,
+      testSe: se,
+      diffSe: se,
+      relativeSe: control.mean > 0 ? Math.sqrt(varT / control.mean ** 2 + (treatment.mean ** 2 * varC) / control.mean ** 4) : null,
+      n: control.n + treatment.n,
+      degreesOfFreedom: denominator > 0 ? (varC + varT) ** 2 / denominator : control.n + treatment.n - 2,
+    },
+    alpha,
+    sequential
+  );
+}
+
+/**
+ * Everything needed to analyze one metric in one arm, kept as running sums so
+ * arms can be added together and no per-user data has to be retained.
+ *   y = the user's metric value, d = the user's denominator (ratio metrics),
+ *   x = the user's value for the same metric before the experiment (CUPED).
+ */
+export interface ArmStats {
+  n: number;
+  /** Users whose value is above zero. */
+  converters: number;
+  sum: number;
+  sumSq: number;
+  dSum: number;
+  dSumSq: number;
+  ydSum: number;
+  xSum: number;
+  xSumSq: number;
+  xySum: number;
+}
+
+export function emptyArmStats(): ArmStats {
+  return { n: 0, converters: 0, sum: 0, sumSq: 0, dSum: 0, dSumSq: 0, ydSum: 0, xSum: 0, xSumSq: 0, xySum: 0 };
+}
+
+export function addObservation(stats: ArmStats, y: number, d = 0, x = 0): void {
+  stats.n += 1;
+  if (y > 0) stats.converters += 1;
+  stats.sum += y;
+  stats.sumSq += y * y;
+  stats.dSum += d;
+  stats.dSumSq += d * d;
+  stats.ydSum += y * d;
+  stats.xSum += x;
+  stats.xSumSq += x * x;
+  stats.xySum += x * y;
+}
+
+/** Arm stats for a yes/no metric, from plain counts. */
+export function armFromCounts(exposures: number, conversions: number): ArmStats {
+  return { ...emptyArmStats(), n: exposures, converters: conversions, sum: conversions, sumSq: conversions };
+}
+
+export function meanMoments(s: ArmStats): Moments {
+  const mean = s.n === 0 ? 0 : s.sum / s.n;
+  return { n: s.n, mean, variance: s.n < 2 ? 0 : Math.max(0, (s.sumSq - s.n * mean * mean) / (s.n - 1)) };
+}
+
+/**
+ * A ratio of two per-user totals (revenue per order, clicks per session). The
+ * numerator and denominator come from the same users, so they move together;
+ * the delta method folds that correlation into one per-user variance.
+ */
+export function ratioMoments(s: ArmStats): Moments {
+  if (s.n < 2 || s.dSum === 0) return { n: s.n, mean: 0, variance: 0 };
+  const yBar = s.sum / s.n;
+  const dBar = s.dSum / s.n;
+  const ratio = s.sum / s.dSum;
+  const varY = (s.sumSq - s.n * yBar * yBar) / (s.n - 1);
+  const varD = (s.dSumSq - s.n * dBar * dBar) / (s.n - 1);
+  const cov = (s.ydSum - s.n * yBar * dBar) / (s.n - 1);
+  return { n: s.n, mean: ratio, variance: Math.max(0, (varY - 2 * ratio * cov + ratio * ratio * varD) / (dBar * dBar)) };
+}
+
+export interface CupedResult {
+  /** How strongly pre-experiment behavior predicts in-experiment behavior. */
+  theta: number;
+  adjusted: Moments[];
+  /** Share of variance removed (0.3 = the test needs about 30% fewer users). */
+  varianceReduction: number;
+}
+
+/**
+ * CUPED: subtract the part of each user's result that their pre-experiment
+ * behavior already predicted. Randomization makes that part equal across arms
+ * on average, so removing it leaves the treatment effect untouched while
+ * shrinking the noise around it.
+ */
+export function cuped(arms: ArmStats[]): CupedResult | null {
+  const total = arms.reduce((s, a) => s + a.n, 0);
+  if (total < 2 || arms.some((a) => a.n < 2)) return null;
+
+  let sxx = 0;
+  let sxy = 0;
+  let syy = 0;
+  const within = arms.map((a) => {
+    const xBar = a.xSum / a.n;
+    const yBar = a.sum / a.n;
+    const part = { xx: a.xSumSq - a.n * xBar * xBar, xy: a.xySum - a.n * xBar * yBar, yy: a.sumSq - a.n * yBar * yBar, xBar, yBar };
+    sxx += part.xx;
+    sxy += part.xy;
+    syy += part.yy;
+    return part;
+  });
+  if (sxx <= 0 || syy <= 0) return null;
+
+  const theta = sxy / sxx;
+  const xBarAll = arms.reduce((s, a) => s + a.xSum, 0) / total;
+  const adjusted = arms.map((a, i) => {
+    const w = within[i]!;
+    return {
+      n: a.n,
+      mean: w.yBar - theta * (w.xBar - xBarAll),
+      variance: Math.max(0, (w.yy - 2 * theta * w.xy + theta * theta * w.xx) / (a.n - 1)),
+    };
+  });
+  return { theta, adjusted, varianceReduction: Math.max(0, (sxy * sxy) / (sxx * syy)) };
+}
+
+/** Users needed per variant to detect a relative lift of `mde` in a per-user average. */
+export function requiredSampleSizeMean(mean: number, standardDeviation: number, mde: number, alpha = 0.05, power = 0.8): number {
+  const delta = Math.abs(mean * mde);
+  if (!(delta > 0) || !(standardDeviation > 0)) return Number.POSITIVE_INFINITY;
+  const z = normalQuantile(1 - alpha / 2) + normalQuantile(power);
+  return Math.ceil((2 * z * z * standardDeviation * standardDeviation) / (delta * delta));
 }
 
 /**

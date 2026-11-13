@@ -1,5 +1,5 @@
 import { Command } from 'cmdk';
-import { ArrowRight, FlaskConical, Moon, Plus } from 'lucide-react';
+import { ArrowRight, FlaskConical, Moon, Plus, Settings } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { FlagSummary } from '../api';
@@ -62,6 +62,9 @@ export function CommandMenu({
                 </Item>
                 <Item value="all experiments home" onSelect={() => run(() => navigate('#/'))}>
                   <FlaskConical className="size-4 text-fg-muted" /> All experiments
+                </Item>
+                <Item value="settings holdouts sdk keys environments" onSelect={() => run(() => navigate('#/settings'))}>
+                  <Settings className="size-4 text-fg-muted" /> Settings
                 </Item>
                 <Item value="toggle theme dark light mode" onSelect={() => run(onToggleTheme)}>
                   <Moon className="size-4 text-fg-muted" /> Toggle theme

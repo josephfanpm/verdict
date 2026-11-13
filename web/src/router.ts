@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { flushSync } from 'react-dom';
 
-export type Route = { page: 'list' } | { page: 'flag'; key: string };
+export type Route = { page: 'list' } | { page: 'settings' } | { page: 'flag'; key: string };
 
 function parse(): Route {
+  if (window.location.hash === '#/settings') return { page: 'settings' };
   const match = window.location.hash.match(/^#\/flags\/(.+)$/);
   return match ? { page: 'flag', key: decodeURIComponent(match[1]!) } : { page: 'list' };
 }
