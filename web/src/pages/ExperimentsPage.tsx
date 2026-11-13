@@ -1,4 +1,4 @@
-import { ChevronRight, FlaskConical, Plus, WifiOff } from 'lucide-react';
+import { Archive, ChevronRight, FlaskConical, Plus, WifiOff } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useMemo, useState } from 'react';
 import type { FlagSummary } from '../api';
@@ -15,9 +15,11 @@ type Filter = 'all' | 'decide' | 'running' | 'off';
 const MATCHES: Record<Filter, (f: FlagSummary) => boolean> = {
   all: () => true,
   decide: (f) => DECIDED.includes(f.summary.verdict),
-  running: (f) => f.flag.enabled && !DECIDED.includes(f.summary.verdict),
-  off: (f) => !f.flag.enabled,
+  running: (f) => f.flag.status === 'running' && !DECIDED.includes(f.summary.verdict),
+  off: (f) => f.flag.status !== 'running',
 };
+
+const STATUS_LABEL = { draft: 'Draft', running: 'Running', stopped: 'Stopped', rolled_out: 'Rolled out', archived: 'Archived' } as const;
 
 /** Verdicts that need attention sort first. */
 const ORDER = ['INVESTIGATE', 'DONT_SHIP', 'SHIP', 'NO_DIFFERENCE', 'KEEP_RUNNING', 'NOT_STARTED'];
@@ -71,7 +73,7 @@ export function ExperimentsPage({ flags, error, onCreate }: { flags: FlagSummary
             { value: 'all', label: 'All', count: counts.all },
             { value: 'decide', label: 'Ready to decide', count: counts.decide },
             { value: 'running', label: 'Running', count: counts.running },
-            { value: 'off', label: 'Off', count: counts.off },
+            { value: 'off', label: 'Not running', count: counts.off },
           ]}
         />
       )}
@@ -118,7 +120,7 @@ export function ExperimentsPage({ flags, error, onCreate }: { flags: FlagSummary
 }
 
 function Row({ item: { flag, summary } }: { item: FlagSummary }) {
-  const showProgress = flag.enabled && summary.totalExposures > 0;
+  const showProgress = flag.status === 'running' && summary.totalExposures > 0;
   return (
     <a
       href={flagHref(flag.key)}
@@ -128,7 +130,16 @@ function Row({ item: { flag, summary } }: { item: FlagSummary }) {
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate font-semibold tracking-tight">{flag.key}</span>
-          {!flag.enabled && <span className="shrink-0 rounded-full bg-neutral-bg px-2 py-0.5 text-[11px] font-medium text-fg-muted">Off</span>}
+          {flag.status !== 'running' && (
+            <span className="shrink-0 rounded-full bg-neutral-bg px-2 py-0.5 text-[11px] font-medium text-fg-muted">{STATUS_LABEL[flag.status]}</span>
+          )}
+          {summary.cleanup && (
+            <Tooltip content={summary.cleanup}>
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warn-bg px-2 py-0.5 text-[11px] font-medium text-warn">
+                <Archive className="size-3" /> Clean up
+              </span>
+            </Tooltip>
+          )}
         </div>
         <p className="truncate text-sm text-fg-muted">{flag.description || 'No description'}</p>
         <div className="mt-1.5 flex items-center gap-2 sm:hidden">

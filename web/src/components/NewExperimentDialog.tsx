@@ -2,17 +2,19 @@ import { Plus, X } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
 import { FLAG_KEY_PATTERN as KEY_PATTERN } from '../../../src/core/evaluate';
-import { api, ApiError } from '../api';
+import { api, ApiError, type MetricKind } from '../api';
 import { flagHref, navigate } from '../router';
 import { Button } from './ui/button';
 import { Dialog, DialogContent } from './ui/dialog';
-import { Field, Input } from './ui/input';
+import { Field, Input, Select } from './ui/input';
 
 export function NewExperimentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [key, setKey] = useState('');
   const [description, setDescription] = useState('');
   const [variants, setVariants] = useState(['control', 'treatment']);
   const [metric, setMetric] = useState('conversion');
+  const [kind, setKind] = useState<MetricKind>('conversion');
+  const [guardrails, setGuardrails] = useState('');
   const [mde, setMde] = useState(10);
   const [saving, setSaving] = useState(false);
 
@@ -21,6 +23,8 @@ export function NewExperimentDialog({ open, onOpenChange }: { open: boolean; onO
     setDescription('');
     setVariants(['control', 'treatment']);
     setMetric('conversion');
+    setKind('conversion');
+    setGuardrails('');
     setMde(10);
   };
 
@@ -32,7 +36,19 @@ export function NewExperimentDialog({ open, onOpenChange }: { open: boolean; onO
     const weighted = keys.map((k, i) => ({ key: k, weight: base + (i < 100 - base * keys.length ? 1 : 0) }));
     setSaving(true);
     try {
-      const flag = await api.createFlag({ key, description, variants: weighted, primaryMetric: metric, minDetectableEffect: mde / 100 });
+      const flag = await api.createFlag({
+        key,
+        description,
+        variants: weighted,
+        goal: { event: metric, kind },
+        // A guardrail is something that should not go up: refunds, errors, unsubscribes.
+        guardrails: guardrails
+          .split(',')
+          .map((g) => g.trim())
+          .filter(Boolean)
+          .map((event) => ({ event, direction: 'decrease' as const })),
+        minDetectableEffect: mde / 100,
+      });
       toast.success('Experiment created', { description: 'It starts off. Turn it on in Setup when you are ready.' });
       onOpenChange(false);
       reset();
@@ -101,8 +117,17 @@ export function NewExperimentDialog({ open, onOpenChange }: { open: boolean; onO
             <Field label="Goal event">
               <Input value={metric} onChange={(e) => setMetric(e.target.value)} required />
             </Field>
+            <Field label="Measure">
+              <Select value={kind} onChange={(e) => setKind(e.target.value as MetricKind)}>
+                <option value="conversion">Did it (yes/no)</option>
+                <option value="mean">Value per user</option>
+              </Select>
+            </Field>
             <Field label="Smallest lift (%)">
               <Input type="number" min={1} max={500} value={mde} onChange={(e) => setMde(Number(e.target.value))} />
+            </Field>
+            <Field label="Guardrail events">
+              <Input value={guardrails} onChange={(e) => setGuardrails(e.target.value)} placeholder="refund, error" />
             </Field>
           </div>
 

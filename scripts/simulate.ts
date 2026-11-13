@@ -6,6 +6,7 @@
  */
 import { rmSync } from 'node:fs';
 import { analyze } from '../src/core/analyze.js';
+import { readPhase } from '../src/server/app.js';
 import { seedDemo } from '../src/server/demo.js';
 import { Store } from '../src/server/store.js';
 
@@ -21,7 +22,7 @@ const seededIn = Math.round(performance.now() - started);
 
 console.log(`Seeded ${path} in ${seededIn} ms\n`);
 for (const flag of store.listFlags()) {
-  const report = analyze(flag, store.variantCounts(flag.key, flag.primaryMetric));
+  const report = analyze(flag, readPhase(store, flag, flag.phase, Date.now()).input);
   console.log(`${report.verdict.kind.padEnd(13)} ${flag.key.padEnd(22)} ${report.totalExposures.toLocaleString('en-US').padStart(7)} users  ${report.verdict.headline}`);
 }
 store.close();

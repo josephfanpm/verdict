@@ -1,4 +1,4 @@
-import { Command, Moon, Plus, Sun } from 'lucide-react';
+import { Command, Moon, Plus, Settings, Sun } from 'lucide-react';
 import { MotionConfig } from 'motion/react';
 import { useCallback, useEffect, useState } from 'react';
 import { Toaster } from 'sonner';
@@ -10,6 +10,7 @@ import { Button } from './components/ui/button';
 import { Tooltip, TooltipProvider } from './components/ui/tooltip';
 import { ExperimentPage } from './pages/ExperimentPage';
 import { ExperimentsPage } from './pages/ExperimentsPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { useRoute } from './router';
 import { useTheme } from './theme';
 
@@ -72,6 +73,14 @@ export function App() {
             </kbd>
           </button>
 
+          <Tooltip content="Settings">
+            <Button asChild variant="ghost" size="icon" aria-label="Settings">
+              <a href="#/settings">
+                <Settings />
+              </a>
+            </Button>
+          </Tooltip>
+
           <Tooltip content="Toggle theme">
             <Button variant="ghost" size="icon" onClick={toggle} aria-label="Toggle theme">
               <Sun className="hidden dark:block" />
@@ -88,6 +97,8 @@ export function App() {
       <main className="mx-auto max-w-6xl px-4 pb-24 pt-8 sm:px-6 sm:pt-12">
         {route.page === 'flag' ? (
           <ExperimentPage key={route.key} flagKey={route.key} onChanged={reloadFlags} />
+        ) : route.page === 'settings' ? (
+          <SettingsPage />
         ) : (
           <ExperimentsPage flags={flags} error={error} onCreate={() => setCreating(true)} />
         )}

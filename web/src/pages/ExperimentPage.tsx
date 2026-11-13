@@ -1,12 +1,13 @@
 import confetti from 'canvas-confetti';
-import { Check, ChevronLeft, Copy, History } from 'lucide-react';
+import { Archive, Check, ChevronLeft, Copy, History, Play, Rocket, Square } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { api, type AuditEntry, type ExperimentReport, type FlagConfig, type TimeseriesPoint } from '../api';
 import { LiftForest } from '../components/LiftForest';
 import { LiftOverTime } from '../components/LiftOverTime';
-import { SplitHealth, StatTiles, VariantsTable, VerdictHero } from '../components/Results';
-import { ConfigCard, Planner, Playground } from '../components/Setup';
+import { GuardrailsCard, HealthCard, SegmentsCard, StatTiles, VariantsTable, VerdictHero } from '../components/Results';
+import { ConfigCard, LifecycleCard, Planner, Playground } from '../components/Setup';
 import { Button } from '../components/ui/button';
 import { Card, CardBody, CardHeader } from '../components/ui/card';
 import { Segmented } from '../components/ui/segmented';
@@ -15,6 +16,7 @@ import { timeAgo } from '../format';
 
 type Tab = 'results' | 'setup' | 'history';
 const REFRESH_MS = 15_000;
+const STALE_MS = 14 * 86_400_000;
 
 export function ExperimentPage({ flagKey, onChanged }: { flagKey: string; onChanged: () => Promise<void> }) {
   const [flag, setFlag] = useState<FlagConfig | null>(null);
@@ -23,10 +25,14 @@ export function ExperimentPage({ flagKey, onChanged }: { flagKey: string; onChan
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('results');
+  /** Which phase's results are shown. Undefined follows the current phase. */
+  const [phase, setPhase] = useState<number | undefined>(undefined);
 
   const load = useCallback(async () => {
     try {
-      const [f, r, t, a] = await Promise.all([api.getFlag(flagKey), api.results(flagKey), api.timeseries(flagKey), api.audit(flagKey)]);
+      // Results first: reading them is what locks the sample plan, and the flag should reflect that.
+      const [r, t] = await Promise.all([api.results(flagKey, phase), api.timeseries(flagKey, phase)]);
+      const [f, a] = await Promise.all([api.getFlag(flagKey), api.audit(flagKey)]);
       setFlag(f);
       setReport(r);
       setPoints(t);
@@ -35,7 +41,7 @@ export function ExperimentPage({ flagKey, onChanged }: { flagKey: string; onChan
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [flagKey]);
+  }, [flagKey, phase]);
 
   // Refresh quietly while the tab is visible, so the numbers roll as data arrives.
   useEffect(() => {
@@ -44,11 +50,23 @@ export function ExperimentPage({ flagKey, onChanged }: { flagKey: string; onChan
     return () => window.clearInterval(id);
   }, [load]);
 
-  useCelebration(flagKey, report);
+  const viewingCurrent = phase === undefined || phase === flag?.phase;
+  useCelebration(flagKey, viewingCurrent ? report : null);
 
   const saved = useCallback(async () => {
+    setPhase(undefined);
     await Promise.all([load(), onChanged()]);
   }, [load, onChanged]);
+
+  async function act(action: () => Promise<unknown>, done: string) {
+    try {
+      await action();
+      toast.success(done);
+      await saved();
+    } catch (e) {
+      toast.error("Couldn't do that", { description: e instanceof Error ? e.message : String(e) });
+    }
+  }
 
   if (error && !flag) {
     return (
@@ -62,6 +80,17 @@ export function ExperimentPage({ flagKey, onChanged }: { flagKey: string; onChan
     );
   }
   if (!flag || !report) return <DetailSkeleton />;
+
+  const live = flag.status === 'running' || flag.status === 'rolled_out';
+  const statusText = {
+    draft: 'Draft',
+    running: `Live · ${flag.rolloutPercent}%`,
+    stopped: 'Stopped',
+    rolled_out: `Rolled out · ${flag.rolledOutVariant}`,
+    archived: 'Archived',
+  }[flag.status];
+  const stale = (flag.status === 'rolled_out' || flag.status === 'stopped') && flag.statusChangedAt !== null && Date.now() - flag.statusChangedAt > STALE_MS;
+  const winner = report.verdict.winner;
 
   return (
     <div>
@@ -77,17 +106,57 @@ export function ExperimentPage({ flagKey, onChanged }: { flagKey: string; onChan
           </div>
           <p className="mt-1 max-w-2xl text-fg-muted">{flag.description || 'No description'}</p>
         </div>
-        <div className="flex items-center gap-2 text-[13px] text-fg-muted">
-          <span className="relative flex size-2">
-            {flag.enabled && <span className="absolute inline-flex size-full animate-ping rounded-full bg-good opacity-60" />}
-            <span className={`relative inline-flex size-2 rounded-full ${flag.enabled ? 'bg-good' : 'bg-fg-faint'}`} />
-          </span>
-          {flag.enabled ? `Live · ${flag.rolloutPercent}%` : 'Off'}
-          <span className="text-fg-faint">· v{flag.version}</span>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 text-[13px] text-fg-muted">
+            <span className="relative flex size-2">
+              {flag.status === 'running' && <span className="absolute inline-flex size-full animate-ping rounded-full bg-good opacity-60" />}
+              <span className={`relative inline-flex size-2 rounded-full ${live ? 'bg-good' : 'bg-fg-faint'}`} />
+            </span>
+            {statusText}
+            <span className="text-fg-faint">· v{flag.version}</span>
+          </div>
+          {/* The one next step the verdict points to. Everything else lives under Setup. */}
+          {flag.status === 'draft' && (
+            <Button variant="primary" size="sm" onClick={() => void act(() => api.start(flagKey), 'Started')}>
+              <Play /> Start
+            </Button>
+          )}
+          {flag.status === 'running' && viewingCurrent && report.verdict.kind === 'SHIP' && winner && (
+            <Button variant="primary" size="sm" onClick={() => void act(() => api.rollout(flagKey, winner), `Rolled out ${winner}`)}>
+              <Rocket /> Roll out {winner}
+            </Button>
+          )}
+          {flag.status === 'running' && viewingCurrent && report.verdict.kind === 'DONT_SHIP' && (
+            <Button variant="danger" size="sm" onClick={() => void act(() => api.stop(flagKey), 'Stopped')}>
+              <Square /> Stop
+            </Button>
+          )}
         </div>
       </div>
 
+      {stale && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-warn-bg px-5 py-3 text-[14px] text-warn">
+          <span className="flex items-center gap-2 font-medium">
+            <Archive className="size-4" /> Decided {timeAgo(flag.statusChangedAt!)}. Remove the flag from code, then archive it.
+          </span>
+          <Button size="sm" onClick={() => void act(() => api.archive(flagKey), 'Archived')}>
+            Archive
+          </Button>
+        </div>
+      )}
+
       <div className="space-y-4">
+        {flag.phases.length > 1 && (
+          <div className="flex flex-wrap items-center gap-3">
+            <Segmented
+              label="Phase"
+              value={String(phase ?? flag.phase)}
+              onChange={(value) => setPhase(Number(value) === flag.phase ? undefined : Number(value))}
+              options={flag.phases.map((p) => ({ value: String(p.number), label: `Phase ${p.number}` }))}
+            />
+            {!viewingCurrent && <span className="text-[13px] text-fg-muted">Closed {timeAgo(flag.phases.find((p) => p.number === phase)?.endedAt ?? Date.now())}</span>}
+          </div>
+        )}
         <VerdictHero report={report} />
         <StatTiles report={report} points={points} />
       </div>
@@ -108,7 +177,7 @@ export function ExperimentPage({ flagKey, onChanged }: { flagKey: string; onChan
       <motion.div key={tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
         {tab === 'results' && (
           <div className="grid gap-4 lg:grid-cols-5 [&>*]:min-w-0">
-            <Card className="lg:col-span-3">
+            <Card className="flex flex-col lg:col-span-3">
               <CardHeader
                 title="Lift vs control"
                 description={
@@ -119,22 +188,33 @@ export function ExperimentPage({ flagKey, onChanged }: { flagKey: string; onChan
                   )
                 }
               />
-              <CardBody className={report.srm.mismatch ? 'opacity-60' : undefined}>
+              {/* Centered so the chart sits mid-card when the health card beside it is taller. */}
+              <CardBody className={`flex flex-1 items-center ${report.srm.mismatch ? 'opacity-60' : ''}`}>
                 <LiftForest report={report} />
               </CardBody>
             </Card>
             <div className="lg:col-span-2">
-              <SplitHealth report={report} />
+              <HealthCard report={report} />
             </div>
+            {report.guardrails.length > 0 && (
+              <div className="lg:col-span-5">
+                <GuardrailsCard report={report} />
+              </div>
+            )}
             <Card className="lg:col-span-5">
-              <CardHeader title="Lift over time" description="Cumulative. The band narrows as data arrives." />
+              <CardHeader title="Lift over time" description={report.sequential ? 'Cumulative. The band is valid at every point.' : 'Cumulative. The band narrows as data arrives.'} />
               <CardBody>
-                <LiftOverTime points={points} variants={flag.variants.map((v) => v.key)} />
+                <LiftOverTime points={points} variants={report.variants.map((v) => v.variant)} />
               </CardBody>
             </Card>
             <div className="lg:col-span-5">
               <VariantsTable report={report} />
             </div>
+            {Object.keys(report.segments).length > 0 && (
+              <div className="lg:col-span-5">
+                <SegmentsCard report={report} />
+              </div>
+            )}
           </div>
         )}
 
@@ -144,6 +224,7 @@ export function ExperimentPage({ flagKey, onChanged }: { flagKey: string; onChan
               <ConfigCard flag={flag} onSaved={saved} />
             </div>
             <div className="space-y-4 lg:col-span-2">
+              <LifecycleCard flag={flag} report={report} onSaved={saved} />
               <Planner flag={flag} report={report} />
               <Playground flag={flag} />
             </div>

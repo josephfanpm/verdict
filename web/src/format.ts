@@ -2,6 +2,10 @@ export const pct = (x: number, digits = 1) => `${(x * 100).toFixed(digits)}%`;
 export const signedPct = (x: number, digits = 1) => `${x >= 0 ? '+' : ''}${pct(x, digits)}`;
 export const num = (x: number) => x.toLocaleString('en-US');
 export const pValue = (p: number) => (p < 0.001 ? '<0.001' : p.toFixed(3));
+/** A metric's value: a rate for yes/no metrics, a plain number for per-user averages and ratios. */
+export const metricValue = (kind: 'conversion' | 'mean' | 'ratio', v: number) =>
+  kind === 'conversion' ? pct(v, 2) : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const dayCount = (d: number) => (d >= 10 ? Math.round(d).toString() : (Math.floor(d * 10) / 10).toString());
 export const shortDate = (ts: number) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
 /** NumberFlow format presets. */
