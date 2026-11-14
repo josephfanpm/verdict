@@ -8,7 +8,25 @@
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 **Try it:** [run locally in 3 commands](#getting-started) · [Docker](#getting-started) · deploy your own with [`render.yaml`](render.yaml)
-<!-- TODO(Joseph): add a hosted demo URL here if you deploy one (Render free tier is already configured). -->
+
+## Live demo
+
+**Live demo:** not deployed yet. No hosted demo URL exists as of Nov 14, 2026.
+
+The repo is already set up for one click deploy on Render's free tier, using the `render.yaml` blueprint at the repo root (Docker web service named `verdict`, free plan, health check `/api/health`). The Dockerfile sets `SEED_DEMO=true`, so a fresh deploy seeds 8 demo experiments and a holdout automatically.
+
+To deploy it:
+
+1. Create a free account at Render, or sign in with GitHub.
+2. Open the deploy page: [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/josephfanpm/verdict)
+3. Give Render access to the `josephfanpm/verdict` repo, keep branch `main` and blueprint path `render.yaml`, and click Apply.
+4. Wait for the build, roughly 4 to 12 minutes on the free plan. The service URL will look like `https://verdict.onrender.com` (Render assigns the exact hostname; do not guess it, copy it from the Render dashboard).
+5. Open the URL and check `/api/health` returns `{"ok": true}`. The dashboard should show the 8 seeded demo experiments.
+6. Once it is live, replace the "not deployed yet" line above with the real URL, for example: `**Live demo:** https://verdict.onrender.com`
+
+Two free tier notes: the instance sleeps after 15 minutes without traffic, so the first load can take about 50 seconds while it wakes up; and the free disk is ephemeral, so the demo data re-seeds on every restart and any changes made in the demo are lost. That is fine for a portfolio demo, and it is why the demo always starts from the same seeded experiments.
+
+GitHub Pages cannot host this demo: the React dashboard calls the Fastify API on the same server (`/api/flags`, `/api/health`), and Pages serves static files only, with no Node server or SQLite database.
 
 Most experimentation tools show p-values and leave the call to you. Verdict makes the call: **Ship it**, **Don't ship**, **Keep running**, **No difference**, or **Investigate**, with the reasons written out.
 
